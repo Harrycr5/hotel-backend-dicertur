@@ -4,7 +4,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, StringConstraints
 
-ChargeID = Annotated[str, StringConstraints(pattern=r"^chr_(test|live)_[A-Za-z0-9]+$", max_length=100)]
+ChargeID = Annotated[
+    str, StringConstraints(pattern=r"^chr_(test|live)_[A-Za-z0-9]+$", max_length=100)
+]
 
 
 class ChargeCreate(BaseModel):

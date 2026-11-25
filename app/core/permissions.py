@@ -80,12 +80,13 @@ def get_permission_definitions() -> list[dict[str, str]]:
 
 
 def permission_catalog_insert(definitions: list[dict[str, str]]):
-    permissions = sa.table(
+    permissions = sa.Table(
         "permissions",
-        sa.column("id", sa.Uuid(as_uuid=True)),
-        sa.column("code", sa.String(100)),
-        sa.column("name", sa.String(100)),
-        sa.column("description", sa.String(255)),
+        sa.MetaData(),
+        sa.Column("id", sa.Uuid(as_uuid=True)),
+        sa.Column("code", sa.String(100)),
+        sa.Column("name", sa.String(100)),
+        sa.Column("description", sa.String(255)),
     )
     rows = [{"id": uuid4(), **definition} for definition in definitions]
     return insert(permissions).values(rows).on_conflict_do_nothing(index_elements=["code"])

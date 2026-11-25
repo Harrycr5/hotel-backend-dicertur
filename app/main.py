@@ -18,7 +18,6 @@ fastapi_app = FastAPI(
         "tryItOutEnabled": True,
         "docExpansion": "none",
         "filter": True,
-        
     },
 )
 register_exception_handlers(fastapi_app)
