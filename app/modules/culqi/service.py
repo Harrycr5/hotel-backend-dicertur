@@ -10,9 +10,9 @@ from app.core.exceptions import ConflictError, NotFoundError
 from app.modules.payment_methods.models import PaymentMethod
 from app.modules.reservations.choices import ReservationStatus
 from app.modules.reservations.models import Reservation, ReservationPayment
-from app.modules.reservations.router import find_reservation
 from app.modules.reservations.service import (
     EXPIRATION_CHANNEL,
+    find_reservation,
     has_processing_charge,
     hold_has_expired,
     paid_status,

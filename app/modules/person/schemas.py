@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -25,6 +25,9 @@ class PersonCreate(BaseModel):
     gender: PersonGender
     category: PersonCategory
     is_permanent_employee: bool = False
+    employment_start_date: date | None = None
+    employment_end_date: date | None = None
+    branch_id: UUID | None = None
 
 
 class PersonUpdate(BaseModel):
@@ -39,12 +42,20 @@ class PersonUpdate(BaseModel):
     gender: PersonGender | None = None
     category: PersonCategory | None = None
     is_permanent_employee: bool | None = None
+    employment_start_date: date | None = None
+    employment_end_date: date | None = None
+    branch_id: UUID | None = None
+    assignment_effective_from: date | None = None
 
     @model_validator(mode="after")
     def validate_changes(self):
         if not self.model_fields_set:
             raise ValueError("Envía al menos un campo para actualizar.")
-        for field in self.model_fields_set - {"document_number"}:
+        for field in self.model_fields_set - {
+            "document_number",
+            "employment_end_date",
+            "branch_id",
+        }:
             if getattr(self, field) is None:
                 raise ValueError(f"El campo {field} no acepta null.")
         return self
@@ -57,6 +68,17 @@ class PersonRead(PersonCreate):
     mobile_phone: str
     created_at: datetime
     updated_at: datetime
+
+
+class PersonAssignmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    effective_from: date
+    branch_id: UUID | None
+    area: PersonArea
+    category: PersonCategory
+    is_permanent_employee: bool
 
 
 class CustomerRead(BaseModel):

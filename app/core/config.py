@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import EmailStr, Field, PostgresDsn, SecretStr
+from pydantic import EmailStr, Field, HttpUrl, PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Raíz del proyecto: contiene el archivo .env
@@ -37,8 +37,10 @@ class Settings(BaseSettings):
 
     culqi_secret_key: SecretStr | None = None
     culqi_allow_live: bool = False
+    reniec_api_url: HttpUrl = Field(default="https://api.scrall.net/v1/reniec/basico")
+    token_reniec: SecretStr | None = None
 
-    # Correo para códigos de recuperación; desactivado hasta configurarlo.
+    # Correo SMTP para recuperación y envíos operativos.
     smtp_host: str | None = None
     smtp_port: int = Field(default=587, ge=1, le=65535)
     smtp_username: str | None = None

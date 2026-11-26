@@ -27,6 +27,13 @@ ACTION_LABELS = {
     "reconcile": "Conciliar",
     "export": "Exportar",
     "guests_export": "Exportar registro de huéspedes",
+    "quotes_read": "Consultar cotizaciones",
+    "quotes_create": "Crear cotización",
+    "quotes_link": "Vincular cotización",
+    "discount_codes_create": "Crear código de descuento",
+    "discount_codes_apply": "Aplicar código de descuento",
+    "send_email": "Enviar correo",
+    "lookup_dni": "Consultar DNI",
 }
 
 RESOURCE_LABELS = {
@@ -34,6 +41,7 @@ RESOURCE_LABELS = {
     "company_branches": "sucursales",
     "culqi": "Culqi",
     "customers": "clientes",
+    "integrations": "integraciones",
     "payment_methods": "m?todos de pago",
     "permissions": "permisos",
     "persons": "personas",
@@ -51,6 +59,11 @@ RESOURCE_LABELS = {
     "till_shifts": "turnos de caja",
     "tills": "cajas",
     "users": "usuarios",
+    "website_complaints": "quejas y reclamos",
+    "website_contacts": "mensajes de contacto",
+    "website_descriptions": "descripciones web",
+    "website_galleries": "galerías web",
+    "website_media": "archivos del sitio web",
 }
 
 

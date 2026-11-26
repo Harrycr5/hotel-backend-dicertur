@@ -15,7 +15,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from app.core.exceptions import ConflictError, NotFoundError
 from app.modules.companies.models import Branch, Company
 from app.modules.person.choices import PersonArea, PersonCategory, PersonGender
-from app.modules.person.models import Person
+from app.modules.person.models import Person, PersonAssignment
 from app.modules.reservations.choices import ReservationStatus
 from app.modules.reservations.models import Reservation
 from app.modules.reservations.schemas import PERU_TIME
@@ -221,17 +221,17 @@ def write_reasons(sheet: Worksheet, reasons: dict[int, Counter[str]]) -> None:
     sheet["B88"] = sheet["B86"].value + sheet["B87"].value
 
 
-def write_staff(sheet: Worksheet, workers: list[Person]) -> None:
+def write_staff(sheet: Worksheet, workers: list[tuple[Person, PersonAssignment | Person]]) -> None:
     counts = Counter()
-    for worker in workers:
-        if worker.category == PersonCategory.OWNER_OR_PARTNER:
+    for worker, assignment in workers:
+        if assignment.category == PersonCategory.OWNER_OR_PARTNER:
             row = 99
-        elif worker.category == PersonCategory.UNPAID:
+        elif assignment.category == PersonCategory.UNPAID:
             row = 100
         else:
             row = 95 if worker.gender == PersonGender.MASCULINE else 97
-            row += int(not worker.is_permanent_employee)
-        counts[row, worker.area] += 1
+            row += int(not assignment.is_permanent_employee)
+        counts[row, assignment.area] += 1
     for area, column in zip(PersonArea, STAFF_COLUMNS, strict=True):
         for row in range(95, 101):
             sheet[f"{column}{row}"] = counts[row, area]
@@ -240,12 +240,28 @@ def write_staff(sheet: Worksheet, workers: list[Person]) -> None:
         sheet[f"E{row}"] = sum(sheet[f"{column}{row}"].value for column in STAFF_COLUMNS)
 
 
+def staff_for_period(
+    people: list[Person], start: date, end: date, branch_id: UUID | None
+) -> list[tuple[Person, PersonAssignment | Person]]:
+    workers = []
+    for person in people:
+        last_day = min(end - timedelta(days=1), person.employment_end_date or date.max)
+        if max(start, person.labor_start) > last_day:
+            continue
+        assignment = next(
+            (item for item in reversed(person.assignments) if item.effective_from <= last_day),
+            person if not person.assignments else None,
+        )
+        if assignment is not None and assignment.branch_id in (None, branch_id):
+            workers.append((person, assignment))
+    return workers
+
+
 async def generate_report(
     session: AsyncSession, period: ReportPeriod, *, now: datetime | None = None
 ) -> bytes:
     start, end = month_bounds(period)
     now = now or datetime.now(PERU_TIME)
-    next_instant = datetime.combine(end, time.min, PERU_TIME)
     companies = (
         await session.execute(
             select(Company, Department.name, Province.name, District.name)
@@ -257,7 +273,8 @@ async def generate_report(
     ).all()
     if not companies:
         raise NotFoundError("Registra un establecimiento antes de generar el reporte.")
-    if len(companies) > 1 or len((await session.scalars(select(Branch.id).limit(2))).all()) > 1:
+    branch_ids = (await session.scalars(select(Branch.id).limit(2))).all()
+    if len(companies) > 1 or len(branch_ids) > 1:
         raise ConflictError(
             "El inventario y el personal deben vincularse a su establecimiento para generar el reporte."
         )
@@ -274,9 +291,10 @@ async def generate_report(
             reportable_stays(start, end, now).options(selectinload(Reservation.companions))
         )
     ).all()
-    workers = list(
-        (await session.scalars(select(Person).where(Person.created_at < next_instant))).all()
+    people = list(
+        (await session.scalars(select(Person).options(selectinload(Person.assignments)))).all()
     )
+    workers = staff_for_period(people, start, end, branch_ids[0] if branch_ids else None)
 
     book = load_workbook(TEMPLATE)
     sheet = book.active
@@ -327,7 +345,8 @@ async def generate_report(
         "Los acompañantes se clasifican con la residencia y el motivo del titular.",
         "La capacidad y las tarifas corresponden al inventario vigente. Las tarifas se promedian "
         "por habitación y se redondean al sol.",
-        "El personal corresponde al registro del establecimiento, sin historial de bajas.",
+        "El personal se cuenta por su última asignación vigente en el mes. Para registros sin "
+        "fecha de ingreso se usa la fecha de alta en el sistema.",
     ]
     unmatched = domestic.get(None)
     if unmatched and (unmatched.arrivals or unmatched.guest_nights):

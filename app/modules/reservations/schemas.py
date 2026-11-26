@@ -15,7 +15,9 @@ from pydantic import (
 )
 
 from app.core.document_types import DocumentType
+from app.core.pagination import PaginationParams
 from app.core.phone_numbers import PhoneNumber
+from app.modules.person.choices import PersonGender
 
 from .choices import ReservationStatus
 
@@ -73,6 +75,7 @@ class CompanionCreate(BaseModel):
     document_type: DocumentType
     document_number: DocumentNumber
     full_name: Name
+    gender: PersonGender | None = None
     birth_date: BirthDate | None = None
     phone: PhoneNumber | None = None
     email: EmailStr | None = None
@@ -117,19 +120,15 @@ class DetailRead(DetailCreate):
     created_at: datetime
 
 
-class ReservationFields(BaseModel):
+class ReservationGuestFields(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    room_id: UUID
-    rate_id: UUID
     document_type: DocumentType
     document_number: DocumentNumber | None = None
     full_name: Name
     birth_date: BirthDate
     phone: PhoneNumber
     email: EmailStr
-    is_active: bool = True
-    status: ReservationStatus = ReservationStatus.BOOKED
     country_code: CountryCode
     city: RequiredLocality
     region: RequiredLocality
@@ -138,6 +137,13 @@ class ReservationFields(BaseModel):
     travel_reason: Name
     dietary_restrictions: RequiredLongText
     gender: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
+
+
+class ReservationFields(ReservationGuestFields):
+    room_id: UUID
+    rate_id: UUID
+    is_active: bool = True
+    status: ReservationStatus = ReservationStatus.BOOKED
     payment_method_id: UUID | None = None
     payment_amount: Money | None = None
     transaction_number: Reference | None = None
@@ -205,3 +211,83 @@ class ReservationPaymentsRead(BaseModel):
     payment_method_count: int
     methods: list[ReservationPaymentMethodRead]
     unattributed_amount: Decimal
+
+
+class ReservationQuoteCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    room_id: UUID
+    rate_id: UUID
+    check_in: ReservationDateTime
+    check_out: ReservationDateTime
+    valid_until: ReservationDateTime
+
+    @model_validator(mode="after")
+    def validate_nights(self):
+        if self.nights < 1:
+            raise ValueError("La cotización debe incluir al menos una noche.")
+        return self
+
+    @property
+    def nights(self) -> int:
+        return (
+            self.check_out.astimezone(PERU_TIME).date() - self.check_in.astimezone(PERU_TIME).date()
+        ).days
+
+
+class ReservationQuoteRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    room_id: UUID
+    rate_id: UUID
+    reservation_id: UUID | None
+    check_in: datetime
+    check_out: datetime
+    valid_until: datetime
+    quoted_total: Decimal
+    created_at: datetime
+
+
+class ReservationQuoteLink(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reservation_id: UUID
+
+
+class ReservationQuoteConvert(ReservationGuestFields):
+    companions: list[CompanionCreate] = Field(default_factory=list)
+    discount_code: Reference | None = None
+
+
+class ReservationDiscountCodeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    room_type_id: UUID
+    start_date: date
+    end_date: date
+    is_active: bool = True
+    discount_percentage: Annotated[Decimal, Field(gt=0, le=100, max_digits=5, decimal_places=2)]
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.end_date < self.start_date:
+            raise ValueError("La fecha final debe ser igual o posterior a la fecha inicial.")
+        return self
+
+
+class ReservationDiscountCodeRead(ReservationDiscountCodeCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    code: str
+
+
+class ReservationDiscountCodeFilters(PaginationParams):
+    room_type_id: UUID | None = None
+
+
+class ReservationDiscountApply(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"(?i)^HT[0-9]{8}$")]

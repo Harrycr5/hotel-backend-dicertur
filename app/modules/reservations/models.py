@@ -1,14 +1,16 @@
 from datetime import date, datetime
 from decimal import Decimal
 from typing import ClassVar
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Numeric, String, true
+from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Numeric, String, func, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.document_types import DocumentType
 from app.db.base import Base
 from app.db.mixins import TimestampMixin, UUIDMixin
+from app.modules.person.choices import PersonGender
+from app.modules.person.models import text_choices
 from app.modules.rooms.models import Rate, Room
 
 from .choices import ReservationStatus
@@ -112,6 +114,7 @@ class Companion(UUIDMixin, TimestampMixin, Base):
     document_type: Mapped[DocumentType] = mapped_column(document_type_column())
     document_number: Mapped[str] = mapped_column(String(32))
     full_name: Mapped[str] = mapped_column(String(255))
+    gender: Mapped[PersonGender | None] = mapped_column(text_choices(PersonGender, "gender"))
     birth_date: Mapped[date | None]
     phone: Mapped[str | None] = mapped_column(String(32))
     email: Mapped[str | None] = mapped_column(String(254))
@@ -144,6 +147,53 @@ class ReservationDetail(TimestampMixin, Base):
     room_name: Mapped[str | None] = mapped_column(String(150))
     stay_days: Mapped[int]
     unit_rate: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+
+
+class ReservationDiscountCode(TimestampMixin, Base):
+    __tablename__ = "reservation_discount_codes"
+    __permission_actions__: ClassVar[tuple[str, ...]] = ()
+    __table_args__ = (
+        CheckConstraint("end_date >= start_date", name="valid_dates"),
+        CheckConstraint(
+            "discount_percentage > 0 AND discount_percentage <= 100", name="valid_percentage"
+        ),
+        CheckConstraint(
+            "NOT is_active OR (room_type_id IS NOT NULL AND start_date IS NOT NULL "
+            "AND end_date IS NOT NULL AND discount_percentage IS NOT NULL)",
+            name="active_requires_configuration",
+        ),
+    )
+
+    code: Mapped[str] = mapped_column(String(10), primary_key=True)
+    id: Mapped[UUID] = mapped_column(
+        unique=True, default=uuid4, server_default=func.gen_random_uuid()
+    )
+    room_type_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("room_types.id", ondelete="RESTRICT"), index=True
+    )
+    start_date: Mapped[date | None]
+    end_date: Mapped[date | None]
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=true())
+    discount_percentage: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+
+
+class ReservationQuote(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "reservation_quotes"
+    __permission_actions__: ClassVar[tuple[str, ...]] = ()
+    __table_args__ = (
+        CheckConstraint("check_out > check_in", name="valid_stay"),
+        CheckConstraint("quoted_total >= 0", name="nonnegative_total"),
+    )
+
+    room_id: Mapped[UUID] = mapped_column(ForeignKey("rooms.id", ondelete="RESTRICT"))
+    rate_id: Mapped[UUID] = mapped_column(ForeignKey("room_rates.id", ondelete="RESTRICT"))
+    reservation_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("reservations.id", ondelete="RESTRICT"), index=True
+    )
+    check_in: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    check_out: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    quoted_total: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ReservationPayment(UUIDMixin, TimestampMixin, Base):

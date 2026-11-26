@@ -65,7 +65,7 @@ async def generate_guest_register(
         counted_room_nights.update(room_nights)
         price = stay.detail.unit_rate if stay.detail else stay.rate.price
         for index, guest in enumerate((stay, *stay.companions)):
-            gender = report_key(stay.gender) if index == 0 else ""
+            gender = report_key(guest.gender or "")
             male = int(gender in {"M", "MASCULINO", "HOMBRE"})
             female = int(gender in {"F", "FEMENINO", "MUJER"})
             notes = []

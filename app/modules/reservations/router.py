@@ -1,10 +1,13 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+from secrets import randbelow
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select, true
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.api.dependencies import DbSession
 from app.core.exceptions import AppError, ConflictError, NotFoundError
@@ -12,71 +15,119 @@ from app.core.pagination import Page, Pagination
 from app.core.responses import ApiResponse
 from app.modules.auth.dependencies import require_permissions
 from app.modules.payment_methods.models import PaymentMethod
-from app.modules.rooms.models import Rate, Room
-from app.modules.ubigee.models import Country
+from app.modules.rooms.models import RoomType
 
 from .choices import ReservationStatus
-from .models import Companion, Reservation, ReservationDetail, ReservationPayment
+from .models import Reservation, ReservationDetail, ReservationDiscountCode, ReservationPayment
+from .quotes_router import router as quotes_router
 from .schemas import (
+    PERU_TIME,
     PaymentUpdate,
     ReservationCreate,
+    ReservationDiscountApply,
+    ReservationDiscountCodeCreate,
+    ReservationDiscountCodeFilters,
+    ReservationDiscountCodeRead,
     ReservationPaymentMethodRead,
     ReservationPaymentsRead,
     ReservationRead,
     ReservationStatusRead,
 )
 from .service import (
+    apply_reservation_discount,
     expire_unpaid_reservations,
+    find_reservation,
     has_processing_charge,
     hold_has_expired,
     paid_status,
+    reservation_query,
+    stage_reservation,
+    validate_method,
 )
 
 router = APIRouter(prefix="/reservations", tags=["Reservations"])
-reservation_query = select(Reservation).options(
-    joinedload(Reservation.room).joinedload(Room.room_type),
-    joinedload(Reservation.rate),
-    selectinload(Reservation.companions),
-    selectinload(Reservation.detail),
+router.include_router(quotes_router)
+
+
+@router.get(
+    "/discount-codes",
+    summary="Listar códigos de descuento vigentes",
+    response_model=ApiResponse[Page[ReservationDiscountCodeRead]],
 )
+async def list_discount_codes(
+    session: DbSession, filters: Annotated[ReservationDiscountCodeFilters, Query()]
+):
+    today = datetime.now(PERU_TIME).date()
+    conditions = [
+        ReservationDiscountCode.is_active,
+        ReservationDiscountCode.start_date <= today,
+        ReservationDiscountCode.end_date >= today,
+    ]
+    if filters.room_type_id is not None:
+        conditions.append(ReservationDiscountCode.room_type_id == filters.room_type_id)
+    total = await session.scalar(
+        select(func.count()).select_from(ReservationDiscountCode).where(*conditions)
+    )
+    promotions = await session.scalars(
+        select(ReservationDiscountCode)
+        .where(*conditions)
+        .order_by(ReservationDiscountCode.created_at.desc(), ReservationDiscountCode.code)
+        .offset(filters.offset)
+        .limit(filters.page_size)
+    )
+    return ApiResponse[Page[ReservationDiscountCodeRead]](
+        data=Page[ReservationDiscountCodeRead].build(
+            [ReservationDiscountCodeRead.model_validate(promotion) for promotion in promotions],
+            total or 0,
+            filters,
+        )
+    )
 
 
-async def find_reservation(session: DbSession, reservation_id: UUID, *, lock: bool = False):
-    query = reservation_query.where(Reservation.id == reservation_id)
-    if lock:
-        query = query.with_for_update(of=Reservation)
-    reservation = await session.scalar(query)
-    if reservation is None:
-        raise NotFoundError("Reserva no encontrada.")
-    return reservation
+@router.post(
+    "/discount-codes",
+    summary="Generar código de descuento para reservas",
+    response_model=ApiResponse[ReservationDiscountCodeRead],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permissions("reservations.discount_codes_create"))],
+)
+async def create_discount_code(data: ReservationDiscountCodeCreate, session: DbSession):
+    if await session.get(RoomType, data.room_type_id) is None:
+        raise NotFoundError("Tipo de habitación no encontrado.")
+    insert = pg_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+    for _ in range(8):
+        candidate = f"HT{randbelow(100_000_000):08d}"
+        promotion = await session.scalar(
+            insert(ReservationDiscountCode)
+            .values(code=candidate, **data.model_dump())
+            .on_conflict_do_nothing(index_elements=[ReservationDiscountCode.code])
+            .returning(ReservationDiscountCode)
+        )
+        if promotion is not None:
+            await session.commit()
+            return ApiResponse[ReservationDiscountCodeRead](
+                data=ReservationDiscountCodeRead.model_validate(promotion)
+            )
+    raise HTTPException(503, "No se pudo generar un código. Intenta nuevamente.")
 
 
-async def validate_method(session: DbSession, method_id: UUID) -> None:
-    method = await session.get(PaymentMethod, method_id)
-    if method is None:
-        raise NotFoundError("Método de pago no encontrado.")
-    if not method.is_active:
-        raise ConflictError("El método de pago está inactivo.")
-
-
-def initial_status(data: ReservationCreate, now: datetime) -> ReservationStatus:
-    detail = data.detail
-    paid = detail.amount_paid if detail else Decimal("0")
-    if data.payment_amount is not None and data.payment_amount > paid:
-        raise AppError("El importe del pago requiere un detalle con el monto acumulado pagado.")
-    if data.status == ReservationStatus.CANCELED:
-        return data.status
-    if data.status == ReservationStatus.WITHOUT_PAYMENT:
-        if paid > 0:
-            raise AppError("Una reserva sin pagos no puede registrar un monto pagado.")
-        return data.status
-
-    computed = paid_status(paid, detail.final_total) if detail else ReservationStatus.BOOKED
-    if computed == ReservationStatus.BOOKED and hold_has_expired(data.created_at or now, now):
-        computed = ReservationStatus.EXPIRED
-    if data.status not in (ReservationStatus.BOOKED, computed):
-        raise AppError("El estado indicado no corresponde al pago o a la antigüedad de la reserva.")
-    return computed
+@router.patch(
+    "/{reservation_id}/discount-code",
+    summary="Aplicar código de descuento a una reserva",
+    response_model=ApiResponse[ReservationRead],
+    dependencies=[Depends(require_permissions("reservations.discount_codes_apply"))],
+)
+async def apply_discount_code(
+    reservation_id: UUID, data: ReservationDiscountApply, session: DbSession
+):
+    reservation = await find_reservation(session, reservation_id, lock=True)
+    if await has_processing_charge(session, reservation_id):
+        raise ConflictError("Hay un cargo Culqi pendiente de conciliación.")
+    await apply_reservation_discount(
+        session, reservation, reservation.room.room_type_id, data.code, datetime.now(timezone.utc)
+    )
+    await session.commit()
+    return ApiResponse[ReservationRead](data=ReservationRead.model_validate(reservation))
 
 
 @router.get(
@@ -125,36 +176,7 @@ async def list_reservations(session: DbSession, pagination: Pagination):
     dependencies=[Depends(require_permissions("reservations.create"))],
 )
 async def create_reservation(data: ReservationCreate, session: DbSession):
-    if await session.get(Room, data.room_id) is None:
-        raise NotFoundError("Habitación no encontrada.")
-    if await session.get(Rate, data.rate_id) is None:
-        raise NotFoundError("Tarifa no encontrada.")
-    if await session.get(Country, data.country_code) is None:
-        raise NotFoundError("País no encontrado.")
-    if data.payment_method_id is not None:
-        await validate_method(session, data.payment_method_id)
-
-    now = datetime.now(timezone.utc)
-    values = data.model_dump(exclude={"status", "companions", "detail", "created_at"})
-    reservation = Reservation(
-        **values,
-        created_at=data.created_at or now,
-        status=initial_status(data, now),
-        companions=[Companion(**person.model_dump()) for person in data.companions],
-        detail=ReservationDetail(**data.detail.model_dump(exclude_none=True))
-        if data.detail
-        else None,
-    )
-    session.add(reservation)
-    if data.payment_method_id is not None and data.payment_amount:
-        await session.flush()
-        session.add(
-            ReservationPayment(
-                reservation_id=reservation.id,
-                payment_method_id=data.payment_method_id,
-                amount=data.payment_amount,
-            )
-        )
+    reservation = await stage_reservation(data, session)
     await session.commit()
     reservation = await find_reservation(session, reservation.id)
     return ApiResponse[ReservationRead](data=ReservationRead.model_validate(reservation))

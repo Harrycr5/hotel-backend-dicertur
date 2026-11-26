@@ -31,6 +31,7 @@ Edita `.env` y conserva el archivo fuera del control de versiones.
 | `SMTP_*` | Configuración opcional para enviar códigos de recuperación de contraseña. |
 | `CULQI_SECRET_KEY` | Llave privada del backend. Usa una llave `sk_test_…` para pruebas. |
 | `CULQI_ALLOW_LIVE` | `false` por defecto. Junto con una llave `sk_live_…`, habilita cobros reales. |
+| `RENIEC_API_URL` y `TOKEN_RENIEC` | URL HTTPS de Scrall y clave privada para consultar DNI desde el backend. |
 
 ```powershell
 python -m alembic upgrade head
@@ -54,10 +55,17 @@ Las rutas de la tabla llevan el prefijo `/api/v1`. Los listados paginados admite
 | Empresas | `/companies`, `/companies/{company_id}/branches` | Datos del establecimiento y sus sucursales. El distrito determina provincia y departamento. |
 | Personas y clientes | `/persons`, `/persons/choices`, `/customers` | Personal y consulta de clientes. La confirmación de una reserva registra al cliente y aumenta su contador una sola vez. |
 | Habitaciones | `/rooms`, `/rooms/types`, `/rooms/categories`, `/rooms/floors`, `/rooms/rates` | Inventario, tarifas, capacidad y fotos. Las fotos se convierten a WebP al subirse. |
-| Reservas | `/reservations`, `/reservations/statuses`, `/reservations/{id}/payments` | Reserva de habitación, acompañantes, saldo y resumen por método de pago. |
+| Reservas | `/reservations`, `/reservations/quotes`, `/reservations/{id}/payments` | Reservas, cotizaciones, acompañantes y resumen por método de pago. |
 | Métodos de pago y Culqi | `/payment-methods`, `/culqi/charges` | Catálogo de métodos y cobros de Culqi por token. |
 | Caja | `/tills`, `/tills/{till_id}/shifts`, `/tills/transfers` | Turnos, movimientos, arqueo, transferencias de efectivo y anulaciones. |
 | Reportes | `/reports/months`, `/reports/dircetur`, `/reports/guest-register` | Descarga de los dos reportes mensuales en Excel. |
+| Sitio web | `/website/choices`, `/website/media`, `/website/galleries`, `/website/descriptions`, `/website/complaints`, `/website/contacts` | Contenido público, galería y formularios. Los videos y PDF se publican con base64. Las bandejas de formularios requieren permisos. |
+| Integraciones | `/integrations/email`, `/integrations/reniec` | Envío de correo con adjunto y consulta básica de DNI mediante Scrall. |
+
+## Integraciones
+
+- `POST /api/v1/integrations/email` requiere `integrations.send_email`. Envía `email`, `asunto` y `mensaje`. `archivo` es opcional y admite base64, con hasta 10 MiB una vez decodificado. El servidor usa la configuración `SMTP_*`.
+- `POST /api/v1/integrations/reniec` requiere `integrations.lookup_dni`. Envía `{"dni": "12345678"}` como JSON. Los ocho dígitos deben viajar como texto para conservar ceros iniciales. La respuesta exitosa tiene solo `success` y `data`. Configura `TOKEN_RENIEC` en el `.env` del backend. [Consulta RENIEC básica de Scrall](https://www.scrall.net/apis/reniec_basico)
 
 ## Autenticación y permisos
 
@@ -73,6 +81,34 @@ Una reserva guarda la habitación, la tarifa, los datos del huésped y sus acomp
 - Las reservas ordinarias impagas caducan a las 24 horas de su creación. El worker usa PostgreSQL `LISTEN/NOTIFY` para esperar hasta el próximo vencimiento. Si la API estuvo apagada, procesa los vencimientos pendientes al arrancar.
 - `PATCH /api/v1/reservations/{id}/payment` recibe el **monto acumulado pagado**. `GET /api/v1/reservations/{id}/payments` agrupa los abonos por método e informa el monto histórico sin método identificado.
 - Las aperturas, los cierres, los movimientos, las transferencias y las anulaciones de caja requieren `Idempotency-Key`. Envía montos positivos y distingue `INGRESO` de `EGRESO` con `direction`. El arqueo compara el efectivo esperado con el contado. Una transferencia registra ambos movimientos en una transacción y exige un turno abierto en cada caja.
+
+### Códigos de descuento
+
+`POST /api/v1/reservations/discount-codes` requiere `reservations.discount_codes_create`. Envía `room_type_id`, `start_date`, `end_date` y `discount_percentage` entre 0 y 100, con un valor mayor que cero. `is_active` es opcional y vale `true` por defecto. La respuesta incluye el UUID y un código único como `HT04258317`, disponible en `data.code` para mostrarlo en el popup.
+
+Para aplicar el código a una reserva existente, usa `PATCH /api/v1/reservations/{id}/discount-code` con el permiso `reservations.discount_codes_apply` y el cuerpo `{"code": "HT04258317"}`. También puedes enviar `discount_code` al crear una reserva con detalle financiero o al convertir una cotización. La API comprueba el tipo de habitación, la vigencia inclusiva en hora de Perú y que la reserva esté pendiente, sin pagos ni descuentos previos. Aplica el porcentaje al total y actualiza el saldo. Un descuento que cubra todo el total deja la reserva en `RESERVA SIN PAGOS`.
+
+El popup puede consultar `GET /api/v1/reservations/discount-codes` sin autenticarse. Devuelve los códigos activos y vigentes en `data.items`. Puedes filtrar por `room_type_id` y usar `page` y `page_size`.
+
+### Cotizaciones de reserva
+
+La API calcula `quoted_total` en soles multiplicando el precio de la tarifa vigente por las noches entre las fechas locales de entrada y salida. La tarifa debe estar activa y asignada a la habitación. El total queda guardado con la cotización. Para generar un precio antes de reservar, envía `room_id`, `rate_id`, `check_in`, `check_out` y `valid_until` como fecha y hora de vencimiento futura. La cotización por sí sola no bloquea la habitación.
+
+| Ruta | Permiso | Uso |
+| --- | --- | --- |
+| `POST /api/v1/reservations/quotes` | `reservations.quotes_create` | Crear una cotización de al menos una noche. |
+| `GET /api/v1/reservations/quotes` | `reservations.quotes_read` | Listar con `page` y `page_size`. |
+| `GET /api/v1/reservations/quotes/{quote_id}` | `reservations.quotes_read` | Consultar importe, vigencia y reserva vinculada. |
+| `POST /api/v1/reservations/quotes/{quote_id}/reservation` | `reservations.create` y `reservations.quotes_link` | Crear y vincular una reserva utilizando los datos del titular y sus acompañantes. |
+| `PATCH /api/v1/reservations/quotes/{quote_id}/reservation` | `reservations.quotes_link` | Enviar `{"reservation_id": "<uuid>"}` para vincular una reserva existente a una cotización vigente. Deben coincidir habitación, tarifa y fechas. |
+
+Para el botón **Crear reserva**, usa el `POST` con el ID de la cotización en la URL. Envía nombre, tipo y número de documento si corresponde, fecha de nacimiento, teléfono, correo, país, ciudad, región, distrito, dirección, motivo de viaje, restricciones alimentarias y género del titular. Si hay acompañantes, inclúyelos en `companions`. El backend toma la habitación, tarifa, fechas y total de la cotización, crea el detalle con saldo pendiente y vincula ambos registros en una transacción. Si se repite el `POST`, devuelve la reserva vinculada. El `PATCH` sirve cuando la reserva ya existe.
+
+### Personal y asignaciones
+
+`POST /api/v1/persons` y `PATCH /api/v1/persons/{person_id}` aceptan `employment_start_date`, `employment_end_date` y `branch_id`. Si omites la fecha de ingreso en un alta nueva, se usa la fecha actual de Perú. Deja la fecha de baja vacía mientras la persona siga trabajando.
+
+Los cambios de sucursal, área, categoría o condición de permanente se registran con `assignment_effective_from`. Si omites esa fecha al editar, se usa la fecha actual de Perú o la fecha de ingreso si es posterior. Consulta el historial con `GET /api/v1/persons/{person_id}/assignments`. Para conservar a la persona en reportes anteriores, registra la baja con `employment_end_date`.
 
 ## Integración con Culqi
 

@@ -57,6 +57,7 @@ async def test_person_routes(client, admin_headers):
             "area": "RECEPCIÓN",
             "gender": "FEMENINO",
             "category": "EMPLEADO",
+            "employment_start_date": "2024-01-01",
         },
     )
     assert response.status_code == 201
@@ -72,9 +73,24 @@ async def test_person_routes(client, admin_headers):
     response = await client.patch(detail_path, headers=admin_headers, json={"gender": "Mujer"})
     assert response.status_code == 422
     response = await client.patch(
-        detail_path, headers=admin_headers, json={"is_permanent_employee": True}
+        detail_path,
+        headers=admin_headers,
+        json={
+            "is_permanent_employee": True,
+            "area": "BAR",
+            "assignment_effective_from": "2024-03-01",
+        },
     )
     assert response.status_code == 200
+    response = await client.get(f"{detail_path}/assignments", headers=admin_headers)
+    first, second = response.json()["data"]
+    assert first["area"] == "RECEPCIÓN" and first["is_permanent_employee"] is False
+    assert second["area"] == "BAR" and second["effective_from"] == "2024-03-01"
+    response = await client.patch(
+        detail_path, headers=admin_headers, json={"employment_end_date": "2024-03-31"}
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["employment_end_date"] == "2024-03-31"
     response = await client.get(detail_path, headers=admin_headers)
     assert response.json()["data"]["is_permanent_employee"] is True
     assert (await client.delete(detail_path, headers=admin_headers)).status_code == 204

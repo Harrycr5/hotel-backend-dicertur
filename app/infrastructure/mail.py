@@ -32,16 +32,21 @@ async def send_password_code(recipient: str, code: str) -> None:
         "Si no solicitaste este cambio, ignora este correo."
     )
     try:
-        await aiosmtplib.send(
-            message,
-            hostname=settings.smtp_host,
-            port=settings.smtp_port,
-            username=settings.smtp_username,
-            password=settings.smtp_password.get_secret_value() if settings.smtp_password else None,
-            use_tls=settings.smtp_use_tls,
-            start_tls=settings.smtp_start_tls and not settings.smtp_use_tls,
-            timeout=15,
-        )
+        await send_smtp_message(message)
     except (aiosmtplib.SMTPException, OSError, TimeoutError) as exc:
         # El envío ocurre después de responder; no registrar el mensaje ni su código.
         logger.error("No se pudo enviar el código de recuperación (%s).", type(exc).__name__)
+
+
+async def send_smtp_message(message: EmailMessage) -> None:
+    settings = get_settings()
+    await aiosmtplib.send(
+        message,
+        hostname=settings.smtp_host,
+        port=settings.smtp_port,
+        username=settings.smtp_username,
+        password=settings.smtp_password.get_secret_value() if settings.smtp_password else None,
+        use_tls=settings.smtp_use_tls,
+        start_tls=settings.smtp_start_tls and not settings.smtp_use_tls,
+        timeout=15,
+    )

@@ -5,7 +5,7 @@ import pytest
 from openpyxl import load_workbook
 
 from app.modules.companies.models import Company
-from app.modules.person.models import Person
+from app.modules.person.models import Person, PersonAssignment
 from app.modules.reservations.models import Companion, Reservation
 from app.modules.reservations.schemas import PERU_TIME
 from app.modules.rooms.models import Floor, Rate, Room, RoomType
@@ -47,10 +47,25 @@ async def test_dircetur_download_validates_period_and_counts_across_months(
                 last_name="Prueba",
                 document_type="SIN DOCUMENTO",
                 mobile_phone="+51987654321",
-                area="RECEPCIÓN",
+                area="BAR",
                 gender="FEMENINO",
                 category="EMPLEADO",
-                is_permanent_employee=True,
+                is_permanent_employee=False,
+                employment_start_date=date(2024, 1, 1),
+                assignments=[
+                    PersonAssignment(
+                        effective_from=date(2024, 1, 1),
+                        area="RECEPCIÓN",
+                        category="EMPLEADO",
+                        is_permanent_employee=True,
+                    ),
+                    PersonAssignment(
+                        effective_from=date(2024, 3, 1),
+                        area="BAR",
+                        category="EMPLEADO",
+                        is_permanent_employee=False,
+                    ),
+                ],
                 created_at=instant(1, 1, 0),
             ),
         ]
@@ -99,7 +114,10 @@ async def test_dircetur_download_validates_period_and_counts_across_months(
                 check_out=instant(3, 2, 12),
                 companions=[
                     Companion(
-                        document_type="DNI", document_number="00000000", full_name="Acompañante"
+                        document_type="DNI",
+                        document_number="00000000",
+                        full_name="Acompañante",
+                        gender="MASCULINO",
                     )
                 ],
             ),
@@ -167,6 +185,8 @@ async def test_dircetur_download_validates_period_and_counts_across_months(
     assert register["A5"].value == 1
     assert register["S5"].value == 0
     assert register["B7"].value == "Acompañante"
+    assert register["C7"].value == 1
+    assert register["G7"].value == "Visita familiar"
     assert register["U7"].value == 1
     assert register["T7"].value is None
     for row in register.iter_rows(min_row=5, max_row=7, min_col=1, max_col=22):

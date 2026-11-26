@@ -9,8 +9,14 @@ def test_migration_chain_and_postgresql_sql():
     output = StringIO()
     config = Config("alembic.ini", output_buffer=output)
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_current_head() == "2b25d38d348a"
+    assert scripts.get_current_head() == "0d95be68c3a1"
     assert [revision.revision for revision in scripts.walk_revisions()] == [
+        "0d95be68c3a1",
+        "ed834a961b20",
+        "4fe92b815103",
+        "e83ac17d2b54",
+        "71b27dc9e804",
+        "41c39f2e887a",
         "2b25d38d348a",
         "9a7dd23b61c0",
         "70db419e12c3",
@@ -41,6 +47,17 @@ def test_migration_chain_and_postgresql_sql():
     assert sql.index("CREATE TABLE profiles") < sql.index("INSERT INTO profiles")
     assert "refresh_token_hash VARCHAR(64)" in sql
     assert "CREATE TABLE persons" in sql
+    assert "CREATE TABLE person_assignments (" in sql
+    for table in (
+        "website_media",
+        "website_galleries",
+        "website_gallery_images",
+        "website_descriptions",
+        "website_complaints",
+        "website_contacts",
+    ):
+        assert f"CREATE TABLE {table} (" in sql
+    assert "INSERT INTO person_assignments" in sql
     assert "CREATE TABLE companies" in sql
     assert "CREATE TABLE company_branches" in sql
     assert "CREATE TABLE room_types" in sql
@@ -57,6 +74,9 @@ def test_migration_chain_and_postgresql_sql():
     assert "CREATE TABLE customers (" in sql
     assert "CREATE TABLE culqi_charges (" in sql
     assert "CREATE TABLE reservation_payments (" in sql
+    assert "CREATE TABLE reservation_quotes (" in sql
+    assert "CREATE TABLE reservation_discount_codes (" in sql
+    assert "ALTER TABLE reservation_companions ADD COLUMN gender VARCHAR(9)" in sql
     assert "'reservations.record_payment'" in sql
     assert "'tills.transfer'" in sql
     assert "'reports.export'" in sql

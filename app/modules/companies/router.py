@@ -249,4 +249,8 @@ async def update_branch(company_id: UUID, branch_id: UUID, data: BranchUpdate, s
 async def delete_branch(company_id: UUID, branch_id: UUID, session: DbSession) -> None:
     branch = await get_branch_or_404(session, company_id, branch_id)
     await session.delete(branch)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise ConflictError("La sucursal tiene registros de personal asociados.") from exc
