@@ -1,6 +1,14 @@
 from typing import Annotated, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    StringConstraints,
+    field_validator,
+)
 
 
 class SendEmail(BaseModel):
@@ -32,9 +40,15 @@ class ReniecRecord(BaseModel):
     digitoVerificacion: str | None = Field(
         None, validation_alias=AliasChoices("digitoVerificacion", "D_DIGITOVERIFICACION")
     )
-    preNombres: str | None = Field(None, validation_alias=AliasChoices("preNombres", "D_PRENOMBRES"))
-    apePaterno: str | None = Field(None, validation_alias=AliasChoices("apePaterno", "D_APEPATERNO"))
-    apeMaterno: str | None = Field(None, validation_alias=AliasChoices("apeMaterno", "D_APEMATERNO"))
+    preNombres: str | None = Field(
+        None, validation_alias=AliasChoices("preNombres", "D_PRENOMBRES")
+    )
+    apePaterno: str | None = Field(
+        None, validation_alias=AliasChoices("apePaterno", "D_APEPATERNO")
+    )
+    apeMaterno: str | None = Field(
+        None, validation_alias=AliasChoices("apeMaterno", "D_APEMATERNO")
+    )
     feNacimiento: str | None = Field(
         None, validation_alias=AliasChoices("feNacimiento", "D_FENACIMIENTO")
     )

@@ -2,7 +2,6 @@ import json
 from base64 import b64encode
 
 import pytest
-
 from httpx import AsyncClient, MockTransport, Response
 from pydantic import SecretStr
 

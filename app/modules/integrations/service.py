@@ -129,7 +129,9 @@ async def consult_reniec(dni: str) -> ReniecRecord:
     except ValidationError as exc:
         fields = [error["loc"] for error in exc.errors(include_input=False)]
         logger.warning("Respuesta RENIEC inválida de Scrall. Campos rechazados: %s.", fields)
-        raise HTTPException(502, "Scrall devolvió un registro RENIEC con campos inválidos.") from None
+        raise HTTPException(
+            502, "Scrall devolvió un registro RENIEC con campos inválidos."
+        ) from None
     if record.nuDni != dni:
         logger.warning("Scrall devolvió un DNI diferente al consultado.")
         raise HTTPException(502, "El resultado RENIEC no corresponde al DNI consultado.")

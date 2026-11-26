@@ -209,7 +209,10 @@ Los módulos de `app/modules/` se registran por sus archivos `models.py` y `rout
 python -m alembic revision --autogenerate -m "describe el cambio"
 python -m alembic upgrade head
 python -m ruff check .
+python -m ruff format --check .
 python -m pytest -q
 ```
+
+Antes de hacer commit, ejecuta las dos comprobaciones de Ruff que usa GitHub Actions. Para corregir imports y formato, ejecuta `python -m ruff check --fix .` y luego `python -m ruff format .`.
 
 Revisa la migración autogenerada antes de aplicarla. Las pruebas usan SQLite en memoria por defecto. Para ejecutarlas con PostgreSQL, define `TEST_DATABASE_URL` en el entorno con una base exclusiva cuyo nombre termine en `_test`. GitHub Actions comprueba las migraciones y ejecuta la suite con PostgreSQL.

@@ -24,7 +24,9 @@ async def send_email(data: SendEmail):
     "/reniec",
     summary="Consultar datos básicos de un DNI",
     response_model=ReniecResponse,
-    responses={502: {"description": "Falló la comunicación con Scrall o su respuesta fue inválida."}},
+    responses={
+        502: {"description": "Falló la comunicación con Scrall o su respuesta fue inválida."}
+    },
     dependencies=[Depends(require_permissions("integrations.lookup_dni"))],
 )
 async def lookup_dni(data: ReniecLookup, response: Response):

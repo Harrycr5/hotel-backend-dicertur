@@ -15,6 +15,7 @@ os.environ["ENVIRONMENT"] = "testing"
 os.environ["DEBUG"] = "false"
 os.environ["DATABASE_URL"] = "postgresql+asyncpg://unused:unused@localhost/unused"
 os.environ["JWT_SECRET_KEY"] = "test-only-secret-not-for-production-1234567890"
+os.environ["ACCESS_TOKEN_EXPIRE_MINUTES"] = "15"
 os.environ["CORS_ORIGINS"] = '["http://localhost:5173"]'
 
 from app.api.dependencies import get_db  # noqa: E402
